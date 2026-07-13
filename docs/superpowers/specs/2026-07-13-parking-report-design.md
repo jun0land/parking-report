@@ -69,7 +69,7 @@ Photo (개별 시민이 올린 1장)
   captured_at                       # EXIF 우선, 실패시 수동입력
   gps_source (EXIF/MANUAL), latitude, longitude
   dong_id -> Dong                   # 업로드 시점 uploader.dong_id 스냅샷
-  status (PENDING/MATCHED/EXPIRED)  # 72h 미매칭 시 조회 시점에 EXPIRED 처리
+  status (PENDING/MATCHED/EXPIRED/FALSE)  # 72h 미매칭 시 조회 시점에 EXPIRED 처리. FALSE는 7번 중복이미지 탐지 전용
   created_at
 
 Report (Data Stitching으로 매칭된 신고 건)
@@ -117,7 +117,7 @@ TrustScoreLog (점수 변동 이력 - 투명성용)
 
 ## 7. 허위(FALSE) 탐지 — AI 점수와 별도 로직
 
-업로드 시점에 동일한 `image_hash`(sha256)를 가진 사진이 이미 과거에 사용된 적이 있으면(같은 사진을 재사용해 새로운 목격인 것처럼 조작 시도) 해당 업로드를 즉시 `FALSE`로 확정하고 업로더 본인에게만 -30 신뢰도 페널티를 적용한다.
+업로드 시점에 동일한 `image_hash`(sha256, 원본 업로드 바이트 기준)를 가진 사진이 이미 과거에 존재하면(같은 사진을 재사용해 새로운 목격인 것처럼 조작 시도) 이 업로드는 매칭 풀에 들어가지 않고 **`Photo.status = FALSE`로 즉시 저장**하며, 업로더 본인에게 `TrustScoreLog`를 통해 -30 신뢰도 페널티를 적용한다(`report_id`는 NULL — 이 케이스는 두 사진이 쌍을 이루는 `Report`가 아니라 단일 업로드 자체의 문제이므로 `Report`를 생성하지 않는다).
 
 이렇게 "애매해서 반려(REJECTED, 무감점)"와 "명백히 조작해서 허위(FALSE, -30)"를 명확히 분리하여, 선의로 애매한 신고를 한 사용자가 과도한 불이익을 받지 않도록 한다.
 
