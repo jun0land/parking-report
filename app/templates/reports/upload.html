@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}사진 업로드 - 클린파킹{% endblock %}
+{% block content %}
+<h1>불법 주정차 사진 업로드</h1>
+
+{% if demo_hint %}
+<div class="verify-box">
+  <strong>데모 시연 안내</strong>
+  <p>번호판 <code>{{ demo_hint.plate_number }}</code>, 위도 <code>{{ demo_hint.latitude }}</code>,
+  경도 <code>{{ demo_hint.longitude }}</code>를 입력해보세요 — 다른 시민이 방금 올린 사진과 바로 매칭됩니다.</p>
+</div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" novalidate>
+  {{ form.hidden_tag() }}
+  <label>{{ form.photo.label }} {{ form.photo() }}</label>
+  <label>{{ form.plate_number.label }} {{ form.plate_number() }}</label>
+  <p>위치 정보를 찾을 수 없어요 — EXIF 인식에 실패하면 아래에 직접 입력해주세요.</p>
+  <label>{{ form.manual_latitude.label }} {{ form.manual_latitude() }}</label>
+  <label>{{ form.manual_longitude.label }} {{ form.manual_longitude() }}</label>
+  <label>{{ form.manual_captured_at.label }} {{ form.manual_captured_at(placeholder="2026-07-10 09:00:00") }}</label>
+  {{ form.submit(class_="btn btn-primary") }}
+</form>
+{% endblock %}
