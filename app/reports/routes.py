@@ -116,7 +116,7 @@ def upload():
             )
             db.session.commit()
             flash("이미 사용된 사진입니다. 허위 신고로 판정되어 신뢰도 점수가 -30점 되었습니다.", "error")
-            return render_template("reports/upload.html", form=form, demo_hint=demo_hint)
+            return redirect(url_for("reports.my_reports"))
 
         db.session.commit()
         flash("사진이 업로드되었습니다. 같은 차량의 다른 사진이 올라오면 자동으로 매칭됩니다.", "success")

@@ -102,10 +102,10 @@ def test_duplicate_image_hash_marks_false_and_penalizes_trust_score(app, db, cli
             "manual_captured_at": "2026-07-11 09:00:00",
         },
         content_type="multipart/form-data",
-        follow_redirects=True,
     )
 
-    assert "허위 신고로 판정".encode("utf-8") in response.data
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/my-reports")
     with app.app_context():
         false_photo = Photo.query.filter_by(plate_number="99나9999").first()
         assert false_photo.status == "FALSE"
