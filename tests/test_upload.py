@@ -2,7 +2,7 @@ import io
 
 from PIL import Image
 
-from app.models import Dong, Photo, TrustScoreLog, User
+from app.models import Dong, Photo, Report, TrustScoreLog, User
 
 
 def _image_bytes(color=(10, 20, 30)):
@@ -154,3 +154,40 @@ def test_daily_upload_limit_blocks_low_trust_users(app, db, client):
     assert "오늘 업로드 가능 횟수".encode("utf-8") in response.data
     with app.app_context():
         assert Photo.query.filter_by(plate_number="22나2222").count() == 0
+
+
+def test_second_upload_from_different_user_triggers_valid_match(app, db, client):
+    _signup_and_login(client, app, db, "alice")
+    client.post(
+        "/upload",
+        data={
+            "photo": (io.BytesIO(_image_bytes()), "car1.jpg"),
+            "plate_number": "12가3456",
+            "manual_latitude": "37.5006",
+            "manual_longitude": "127.0364",
+            "manual_captured_at": "2026-07-10 09:00:00",
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    client.get("/logout")
+
+    _signup_and_login(client, app, db, "bob")
+    response = client.post(
+        "/upload",
+        data={
+            "photo": (io.BytesIO(_image_bytes(color=(9, 9, 9))), "car2.jpg"),
+            "plate_number": "12가3456",
+            "manual_latitude": "37.5007",
+            "manual_longitude": "127.0365",
+            "manual_captured_at": "2026-07-10 09:05:00",
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert "매칭되어 신고가 접수되었습니다".encode("utf-8") in response.data
+    with app.app_context():
+        report = Report.query.filter_by(plate_number="12가3456").first()
+        assert report is not None
+        assert report.status == "VALID"

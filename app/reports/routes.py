@@ -10,6 +10,7 @@ from app.models import Photo, TrustScoreLog
 from app.reports.exif_utils import extract_gps_and_time
 from app.reports.forms import UploadForm
 from app.reports.image_utils import save_resized_image
+from app.reports.stitching import attempt_stitch
 
 reports_bp = Blueprint("reports", __name__)
 
@@ -119,7 +120,12 @@ def upload():
             return redirect(url_for("reports.my_reports"))
 
         db.session.commit()
-        flash("사진이 업로드되었습니다. 같은 차량의 다른 사진이 올라오면 자동으로 매칭됩니다.", "success")
+
+        report = attempt_stitch(photo, current_app.config)
+        if report is not None:
+            flash("다른 시민의 사진과 매칭되어 신고가 접수되었습니다!", "success")
+        else:
+            flash("사진이 업로드되었습니다. 같은 차량의 다른 사진이 올라오면 자동으로 매칭됩니다.", "success")
         return redirect(url_for("reports.my_reports"))
 
     return render_template("reports/upload.html", form=form, demo_hint=demo_hint)
@@ -128,4 +134,4 @@ def upload():
 @reports_bp.route("/my-reports")
 @login_required
 def my_reports():
-    return "placeholder"
+    return render_template("reports/my_reports.html")
