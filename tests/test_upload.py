@@ -66,12 +66,13 @@ def test_upload_with_manual_gps_creates_pending_photo(app, db, client):
 def test_upload_without_gps_or_manual_fallback_is_rejected(app, db, client):
     _signup_and_login(client, app, db, "alice")
 
+    recent_capture = (datetime.utcnow() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
     response = client.post(
         "/upload",
         data={
             "photo": (io.BytesIO(_image_bytes()), "car.jpg"),
             "plate_number": "12가3456",
-            "manual_captured_at": "2026-07-10 09:00:00",
+            "manual_captured_at": recent_capture,
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -86,6 +87,10 @@ def test_duplicate_image_hash_marks_false_and_penalizes_trust_score(app, db, cli
     _signup_and_login(client, app, db, "alice")
     image_bytes = _image_bytes()
 
+    now = datetime.utcnow()
+    first_capture = (now - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+    second_capture = (now - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
     client.post(
         "/upload",
         data={
@@ -93,7 +98,7 @@ def test_duplicate_image_hash_marks_false_and_penalizes_trust_score(app, db, cli
             "plate_number": "12가3456",
             "manual_latitude": "37.5006",
             "manual_longitude": "127.0364",
-            "manual_captured_at": "2026-07-10 09:00:00",
+            "manual_captured_at": first_capture,
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -106,7 +111,7 @@ def test_duplicate_image_hash_marks_false_and_penalizes_trust_score(app, db, cli
             "plate_number": "99나9999",
             "manual_latitude": "37.6000",
             "manual_longitude": "127.1000",
-            "manual_captured_at": "2026-07-11 09:00:00",
+            "manual_captured_at": second_capture,
         },
         content_type="multipart/form-data",
     )
@@ -132,6 +137,10 @@ def test_daily_upload_limit_blocks_low_trust_users(app, db, client):
         user.trust_score = 40  # below DAILY_LIMIT_MID_SCORE -> 1/day limit
         db.session.commit()
 
+    now = datetime.utcnow()
+    first_capture = (now - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+    second_capture = (now - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
     client.post(
         "/upload",
         data={
@@ -139,7 +148,7 @@ def test_daily_upload_limit_blocks_low_trust_users(app, db, client):
             "plate_number": "11가1111",
             "manual_latitude": "37.5006",
             "manual_longitude": "127.0364",
-            "manual_captured_at": "2026-07-10 09:00:00",
+            "manual_captured_at": first_capture,
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -152,7 +161,7 @@ def test_daily_upload_limit_blocks_low_trust_users(app, db, client):
             "plate_number": "22나2222",
             "manual_latitude": "37.5006",
             "manual_longitude": "127.0364",
-            "manual_captured_at": "2026-07-10 10:00:00",
+            "manual_captured_at": second_capture,
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -165,6 +174,15 @@ def test_daily_upload_limit_blocks_low_trust_users(app, db, client):
 
 def test_second_upload_from_different_user_triggers_valid_match(app, db, client):
     _signup_and_login(client, app, db, "alice")
+
+    # Anchor both captures to a shared "now" so the 5-minute gap between them
+    # (the intended relative timing this test exercises) is preserved
+    # regardless of when the suite runs, instead of a hardcoded calendar date
+    # that drifts further into the past with every day that passes.
+    now = datetime.utcnow()
+    first_capture = (now - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+    second_capture = (now - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
     client.post(
         "/upload",
         data={
@@ -172,7 +190,7 @@ def test_second_upload_from_different_user_triggers_valid_match(app, db, client)
             "plate_number": "12가3456",
             "manual_latitude": "37.5006",
             "manual_longitude": "127.0364",
-            "manual_captured_at": "2026-07-10 09:00:00",
+            "manual_captured_at": first_capture,
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -187,7 +205,7 @@ def test_second_upload_from_different_user_triggers_valid_match(app, db, client)
             "plate_number": "12가3456",
             "manual_latitude": "37.5007",
             "manual_longitude": "127.0365",
-            "manual_captured_at": "2026-07-10 09:05:00",
+            "manual_captured_at": second_capture,
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -202,6 +220,13 @@ def test_second_upload_from_different_user_triggers_valid_match(app, db, client)
 
 def test_my_reports_groups_pending_and_valid_correctly(app, db, client):
     _signup_and_login(client, app, db, "alice")
+
+    # Uses a captured_at relative to "now" rather than a hardcoded past date:
+    # /my-reports calls sweep_expired_photos(), which would flip a stale
+    # PENDING photo to EXPIRED once its captured_at drifts more than 72 hours
+    # (MATCH_MAX_GAP_SECONDS) into the past, moving it into the wrong section
+    # below and breaking the grouping this test verifies.
+    recent_capture = (datetime.utcnow() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
     client.post(
         "/upload",
         data={
@@ -209,7 +234,7 @@ def test_my_reports_groups_pending_and_valid_correctly(app, db, client):
             "plate_number": "12가3456",
             "manual_latitude": "37.5006",
             "manual_longitude": "127.0364",
-            "manual_captured_at": "2026-07-10 09:00:00",
+            "manual_captured_at": recent_capture,
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -217,5 +242,13 @@ def test_my_reports_groups_pending_and_valid_correctly(app, db, client):
 
     response = client.get("/my-reports")
     assert response.status_code == 200
-    assert "매칭 대기중".encode("utf-8") in response.data
-    assert "12가3456".encode("utf-8") in response.data
+    # These checks are deliberately more specific than "does the plate number
+    # appear somewhere on the page": the pending section renders each row as
+    # "번호판 {plate} · 촬영 ...", while the expired section instead renders
+    # "번호판 {plate} · 매칭 상대를 찾지 못해 만료됨". Asserting the pending
+    # count and the pending-row text (and that the expired-row text is
+    # absent) actually verifies this photo is grouped under "매칭 대기중" and
+    # not silently miscategorized into "반려 · 만료".
+    assert "매칭 대기중 (1)".encode("utf-8") in response.data
+    assert "번호판 12가3456 · 촬영".encode("utf-8") in response.data
+    assert "매칭 상대를 찾지 못해 만료됨".encode("utf-8") not in response.data
