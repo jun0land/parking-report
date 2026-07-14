@@ -69,12 +69,20 @@ def score_match(older_photo, newer_photo, config, now):
     # page, so an unvisited stale PENDING row would otherwise be
     # undercounted here.
     cutoff = now - timedelta(seconds=config["MATCH_MAX_GAP_SECONDS"])
-    lonely_visit_count = Photo.query.filter(
+    lonely_visit_candidates = Photo.query.filter(
         Photo.plate_number == older_photo.plate_number,
         Photo.status.in_(["PENDING", "EXPIRED"]),
         Photo.captured_at < cutoff,
         Photo.id.notin_([older_photo.id, newer_photo.id]),
-    ).count()
+    ).all()
+    lonely_visit_count = sum(
+        1
+        for candidate in lonely_visit_candidates
+        if haversine_distance_meters(
+            older_photo.latitude, older_photo.longitude, candidate.latitude, candidate.longitude
+        )
+        <= config["MATCH_RADIUS_METERS"]
+    )
     repeat_visit_penalty = min(lonely_visit_count * 10, 30)
     score -= repeat_visit_penalty
     reasons.append(f"반복 단시간 방문 이력 {lonely_visit_count}건 (-{repeat_visit_penalty}점)")

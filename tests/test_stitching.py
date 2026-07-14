@@ -180,6 +180,40 @@ def test_score_match_penalizes_repeat_lonely_visits(app, db):
         assert "반복 단시간 방문 이력 2건" in reason
 
 
+def test_score_match_ignores_lonely_visits_at_different_location(app, db):
+    # Same plate, same age/status as the penalized case above, but the
+    # "lonely" sightings are far away (a different city) from the matched
+    # pair's location. A plate seen all over town should NOT be scored as if
+    # it were repeatedly parking briefly at THIS spot.
+    with app.app_context():
+        dong = Dong(name="역삼1동")
+        db.session.add(dong)
+        db.session.commit()
+        alice = _make_user(db, dong.id, "alice")
+        bob = _make_user(db, dong.id, "bob")
+
+        older = _make_photo(db, alice, dong.id, "12가3456", datetime(2026, 7, 10, 9, 0, 0))
+        newer = _make_photo(db, bob, dong.id, "12가3456", datetime(2026, 7, 10, 9, 5, 0))
+
+        # Two prior sightings of the same plate, old enough to be stale, but
+        # located in Busan (~325km away) rather than at the matched pair's spot.
+        _make_photo(
+            db, alice, dong.id, "12가3456", datetime(2020, 1, 1, 9, 0, 0),
+            lat=35.1796, lon=129.0756, status="PENDING",
+        )
+        _make_photo(
+            db, alice, dong.id, "12가3456", datetime(2020, 1, 1, 10, 0, 0),
+            lat=35.1796, lon=129.0756, status="EXPIRED",
+        )
+
+        score, reason = score_match(older, newer, TEST_CONFIG, now=datetime(2026, 7, 10, 9, 5, 0))
+
+        # repeat_visit_penalty should be 0 since neither distant sighting is
+        # within MATCH_RADIUS_METERS of the matched pair's location.
+        assert score == 100
+        assert "반복 단시간 방문 이력 0건" in reason
+
+
 def test_resolve_status_for_score_bands():
     assert resolve_status_for_score(70, TEST_CONFIG) == "VALID"
     assert resolve_status_for_score(100, TEST_CONFIG) == "VALID"
