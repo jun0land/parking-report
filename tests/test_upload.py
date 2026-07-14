@@ -252,3 +252,104 @@ def test_my_reports_groups_pending_and_valid_correctly(app, db, client):
     assert "매칭 대기중 (1)".encode("utf-8") in response.data
     assert "번호판 12가3456 · 촬영".encode("utf-8") in response.data
     assert "매칭 상대를 찾지 못해 만료됨".encode("utf-8") not in response.data
+
+
+def test_my_reports_shows_valid_report_inserted_directly_after_signup(app, db, client):
+    # Regression test for a stale `current_user.photos` relationship-collection
+    # cache. Signing up loads and caches the User object in the session's
+    # identity map. If that object's `.photos` collection gets touched (and
+    # thereby cached) before a Photo/Report pair for this user is inserted
+    # through a path that never goes through `current_user.photos` (e.g. a
+    # direct db.session.add(), the same way the matching/stitching pipeline
+    # does it), a naive `[p.id for p in current_user.photos]` read can return
+    # a stale, empty list even though the rows are genuinely committed.
+    #
+    # This is primed and read within a single shared session/request context
+    # (rather than two separate HTTP requests) because Flask-SQLAlchemy scopes
+    # `db.session` per app context and tears it down after every request/app
+    # context exits -- so two separate `client.get()`/`with app.app_context()`
+    # calls each get a fresh, empty identity map and can never observe this
+    # staleness. The hazard only shows up when a single session's cached
+    # `.photos` survives across an insert that happens on that same session
+    # without an intervening `db.session.commit()` (a commit would expire the
+    # cache via SQLAlchemy's `expire_on_commit=True` default and incidentally
+    # "fix" the read -- which is exactly why today's code only works by
+    # accident: `sweep_expired_photos()`, called at the top of `my_reports()`,
+    # happens to commit unconditionally on every view of the page).
+    _signup_and_login(client, app, db, "alice")
+
+    from flask_login import login_user
+
+    from app.reports.routes import my_reports as my_reports_view
+
+    with app.test_request_context("/my-reports"):
+        user = User.query.filter_by(username="alice").first()
+        login_user(user)
+        dong = Dong.query.first()
+
+        # Prime the relationship-collection cache as empty -- mirrors any
+        # code path that touches `current_user.photos` before this user has
+        # uploaded anything.
+        assert list(user.photos) == []
+
+        now = datetime.utcnow()
+        photo_a = Photo(
+            uploader_id=user.id,
+            plate_number="12가3456",
+            image_path="a.jpg",
+            image_hash="hash-a",
+            captured_at=now - timedelta(hours=2),
+            gps_source="MANUAL",
+            latitude=37.5006,
+            longitude=127.0364,
+            dong_id=dong.id,
+            status="MATCHED",
+        )
+        photo_b = Photo(
+            uploader_id=user.id,
+            plate_number="12가3456",
+            image_path="b.jpg",
+            image_hash="hash-b",
+            captured_at=now - timedelta(hours=1, minutes=55),
+            gps_source="MANUAL",
+            latitude=37.5007,
+            longitude=127.0365,
+            dong_id=dong.id,
+            status="MATCHED",
+        )
+        db.session.add_all([photo_a, photo_b])
+        # flush (not commit): visible within this session without expiring
+        # the already-cached `.photos` collection above -- see the note at
+        # the top of this test for why that distinction matters here.
+        db.session.flush()
+
+        report = Report(
+            plate_number="12가3456",
+            dong_id=dong.id,
+            photo_a_id=photo_a.id,
+            photo_b_id=photo_b.id,
+            time_gap_seconds=300,
+            ai_score=0.95,
+            ai_reason="테스트 매칭",
+            status="VALID",
+            matched_at=now - timedelta(hours=1, minutes=50),
+        )
+        db.session.add(report)
+        db.session.flush()
+
+        # The relationship collection accessed above is still cached empty...
+        assert list(user.photos) == []
+
+        # ...but my_reports() must not be fooled by it: its own direct
+        # Photo.id query must surface the valid report regardless.
+        rendered = my_reports_view()
+        assert "접수완료 - 유효 (1)" in rendered
+        assert "12가3456" in rendered
+
+        db.session.commit()
+
+    # Sanity check against the ordinary request path too.
+    response = client.get("/my-reports")
+    assert response.status_code == 200
+    assert "접수완료 - 유효 (1)".encode("utf-8") in response.data
+    assert "12가3456".encode("utf-8") in response.data

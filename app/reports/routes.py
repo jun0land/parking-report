@@ -153,7 +153,12 @@ def my_reports():
         .all()
     )
 
-    my_photo_ids = [p.id for p in current_user.photos]
+    # Direct query (rather than iterating current_user.photos) so this
+    # doesn't depend on the relationship-collection cache staying in sync
+    # with rows inserted via a separate path after the User was loaded.
+    my_photo_ids = [
+        pid for (pid,) in db.session.query(Photo.id).filter_by(uploader_id=current_user.id).all()
+    ]
     my_reports_all = (
         Report.query.filter(
             db.or_(Report.photo_a_id.in_(my_photo_ids), Report.photo_b_id.in_(my_photo_ids))
