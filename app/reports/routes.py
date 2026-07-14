@@ -6,11 +6,11 @@ from flask import Blueprint, current_app, flash, redirect, render_template, url_
 from flask_login import current_user, login_required
 
 from app.extensions import db
-from app.models import Photo, TrustScoreLog
+from app.models import Photo, Report, TrustScoreLog
 from app.reports.exif_utils import extract_gps_and_time
 from app.reports.forms import UploadForm
 from app.reports.image_utils import save_resized_image
-from app.reports.stitching import attempt_stitch
+from app.reports.stitching import attempt_stitch, resolve_stale_reviewing_reports, sweep_expired_photos
 
 reports_bp = Blueprint("reports", __name__)
 
@@ -134,4 +134,43 @@ def upload():
 @reports_bp.route("/my-reports")
 @login_required
 def my_reports():
-    return render_template("reports/my_reports.html")
+    sweep_expired_photos(current_app.config)
+    resolve_stale_reviewing_reports(current_app.config)
+
+    pending_photos = (
+        Photo.query.filter_by(uploader_id=current_user.id, status="PENDING")
+        .order_by(Photo.created_at.desc())
+        .all()
+    )
+    expired_photos = (
+        Photo.query.filter_by(uploader_id=current_user.id, status="EXPIRED")
+        .order_by(Photo.created_at.desc())
+        .all()
+    )
+    false_photos = (
+        Photo.query.filter_by(uploader_id=current_user.id, status="FALSE")
+        .order_by(Photo.created_at.desc())
+        .all()
+    )
+
+    my_photo_ids = [p.id for p in current_user.photos]
+    my_reports_all = (
+        Report.query.filter(
+            db.or_(Report.photo_a_id.in_(my_photo_ids), Report.photo_b_id.in_(my_photo_ids))
+        )
+        .order_by(Report.matched_at.desc())
+        .all()
+    )
+    reviewing = [r for r in my_reports_all if r.status == "REVIEWING"]
+    valid = [r for r in my_reports_all if r.status == "VALID"]
+    rejected = [r for r in my_reports_all if r.status == "REJECTED"]
+
+    return render_template(
+        "reports/my_reports.html",
+        pending_photos=pending_photos,
+        reviewing=reviewing,
+        valid=valid,
+        rejected=rejected,
+        expired_photos=expired_photos,
+        false_photos=false_photos,
+    )

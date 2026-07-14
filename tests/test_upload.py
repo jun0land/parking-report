@@ -1,4 +1,5 @@
 import io
+from datetime import datetime, timedelta
 
 from PIL import Image
 
@@ -34,6 +35,12 @@ def _signup_and_login(client, app, db, username):
 def test_upload_with_manual_gps_creates_pending_photo(app, db, client):
     _signup_and_login(client, app, db, "alice")
 
+    # Uses a captured_at relative to "now" (rather than a hardcoded past
+    # date) because this request follows a redirect into /my-reports, whose
+    # view calls sweep_expired_photos() — a hardcoded date drifts past the
+    # 72-hour match window over time and would flip the assertion below from
+    # PENDING to EXPIRED.
+    recent_capture = (datetime.utcnow() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
     response = client.post(
         "/upload",
         data={
@@ -41,7 +48,7 @@ def test_upload_with_manual_gps_creates_pending_photo(app, db, client):
             "plate_number": "12가3456",
             "manual_latitude": "37.5006",
             "manual_longitude": "127.0364",
-            "manual_captured_at": "2026-07-10 09:00:00",
+            "manual_captured_at": recent_capture,
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -191,3 +198,24 @@ def test_second_upload_from_different_user_triggers_valid_match(app, db, client)
         report = Report.query.filter_by(plate_number="12가3456").first()
         assert report is not None
         assert report.status == "VALID"
+
+
+def test_my_reports_groups_pending_and_valid_correctly(app, db, client):
+    _signup_and_login(client, app, db, "alice")
+    client.post(
+        "/upload",
+        data={
+            "photo": (io.BytesIO(_image_bytes()), "car1.jpg"),
+            "plate_number": "12가3456",
+            "manual_latitude": "37.5006",
+            "manual_longitude": "127.0364",
+            "manual_captured_at": "2026-07-10 09:00:00",
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    response = client.get("/my-reports")
+    assert response.status_code == 200
+    assert "매칭 대기중".encode("utf-8") in response.data
+    assert "12가3456".encode("utf-8") in response.data
