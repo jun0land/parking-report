@@ -1,5 +1,6 @@
 import io
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -275,7 +276,11 @@ def test_my_reports_shows_valid_report_inserted_directly_after_signup(app, db, c
     # cache via SQLAlchemy's `expire_on_commit=True` default and incidentally
     # "fix" the read -- which is exactly why today's code only works by
     # accident: `sweep_expired_photos()`, called at the top of `my_reports()`,
-    # happens to commit unconditionally on every view of the page).
+    # happens to commit unconditionally on every view of the page). To keep
+    # this test honest about *why* it passes, `sweep_expired_photos` is
+    # patched to a no-op for the direct `my_reports_view()` call below, so the
+    # masking commit can't hide a regression in the `my_photo_ids` query
+    # itself -- reverting just that line in routes.py must fail this test.
     _signup_and_login(client, app, db, "alice")
 
     from flask_login import login_user
@@ -341,8 +346,12 @@ def test_my_reports_shows_valid_report_inserted_directly_after_signup(app, db, c
         assert list(user.photos) == []
 
         # ...but my_reports() must not be fooled by it: its own direct
-        # Photo.id query must surface the valid report regardless.
-        rendered = my_reports_view()
+        # Photo.id query must surface the valid report regardless. Patch
+        # sweep_expired_photos to a no-op for this call only, so its
+        # unconditional commit (and the resulting identity-map expiry) can't
+        # incidentally paper over a regression in the my_photo_ids query.
+        with patch("app.reports.routes.sweep_expired_photos", lambda config: None):
+            rendered = my_reports_view()
         assert "접수완료 - 유효 (1)" in rendered
         assert "12가3456" in rendered
 
