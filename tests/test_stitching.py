@@ -155,6 +155,31 @@ def test_score_match_penalizes_long_gap(app, db):
         assert score < 100
 
 
+def test_score_match_penalizes_repeat_lonely_visits(app, db):
+    with app.app_context():
+        dong = Dong(name="역삼1동")
+        db.session.add(dong)
+        db.session.commit()
+        alice = _make_user(db, dong.id, "alice")
+        bob = _make_user(db, dong.id, "bob")
+
+        older = _make_photo(db, alice, dong.id, "12가3456", datetime(2026, 7, 10, 9, 0, 0))
+        newer = _make_photo(db, bob, dong.id, "12가3456", datetime(2026, 7, 10, 9, 5, 0))
+
+        # Two prior "lonely" sightings of the same plate: never matched, long
+        # since expired relative to the cutoff, and excluded from the pair
+        # above by id. These should trigger the repeat-visit penalty.
+        _make_photo(db, alice, dong.id, "12가3456", datetime(2020, 1, 1, 9, 0, 0), status="PENDING")
+        _make_photo(db, alice, dong.id, "12가3456", datetime(2020, 1, 1, 10, 0, 0), status="EXPIRED")
+
+        score, reason = score_match(older, newer, TEST_CONFIG, now=datetime(2026, 7, 10, 9, 5, 0))
+
+        # time_penalty = 0 (5min gap <= 6h); repeat_bonus = 0 (no VALID reports);
+        # repeat_visit_penalty = min(2 * 10, 30) = 20 -> score = 100 - 20 = 80
+        assert score == 80
+        assert "반복 단시간 방문 이력 2건" in reason
+
+
 def test_resolve_status_for_score_bands():
     assert resolve_status_for_score(70, TEST_CONFIG) == "VALID"
     assert resolve_status_for_score(100, TEST_CONFIG) == "VALID"
@@ -199,6 +224,76 @@ def test_attempt_stitch_returns_none_when_no_candidate(app, db):
         lonely_photo = _make_photo(db, bob, dong.id, "12가3456", datetime(2026, 7, 10, 9, 0, 0))
 
         assert attempt_stitch(lonely_photo, TEST_CONFIG) is None
+
+
+def test_attempt_stitch_rejects_low_score_match(app, db):
+    with app.app_context():
+        dong = Dong(name="역삼1동")
+        db.session.add(dong)
+        db.session.commit()
+        alice = _make_user(db, dong.id, "alice")
+        bob = _make_user(db, dong.id, "bob")
+
+        # 30h gap between the matched pair -> time_penalty = 35 (> 24h)
+        existing = _make_photo(db, alice, dong.id, "34나5678", datetime(2026, 7, 10, 9, 0, 0))
+        new_photo = _make_photo(
+            db, bob, dong.id, "34나5678", datetime(2026, 7, 11, 15, 0, 0), lat=37.5007, lon=127.0365
+        )
+
+        # 3 old lonely sightings of the same plate -> repeat_visit_penalty = min(3 * 10, 30) = 30.
+        # Far enough in the past (2020) that they can never satisfy find_match_candidate's
+        # gap window against the 2026 pair above, so they can't be picked as the match itself.
+        _make_photo(db, alice, dong.id, "34나5678", datetime(2020, 1, 1, 9, 0, 0), status="PENDING")
+        _make_photo(db, alice, dong.id, "34나5678", datetime(2020, 1, 1, 10, 0, 0), status="PENDING")
+        _make_photo(db, alice, dong.id, "34나5678", datetime(2020, 1, 1, 11, 0, 0), status="EXPIRED")
+
+        # Expected score = 100 - 35 (time) + 0 (no VALID history) - 30 (repeat visits) = 35 < 40 -> REJECTED
+        report = attempt_stitch(new_photo, TEST_CONFIG)
+
+        assert report is not None
+        assert report.ai_score == 35
+        assert report.status == "REJECTED"
+        assert report.resolved_at is not None
+
+        alice_after = User.query.filter_by(username="alice").first()
+        bob_after = User.query.filter_by(username="bob").first()
+        assert alice_after.trust_score == 100
+        assert bob_after.trust_score == 100
+        assert TrustScoreLog.query.count() == 0
+
+
+def test_attempt_stitch_leaves_mid_score_match_reviewing(app, db):
+    with app.app_context():
+        dong = Dong(name="역삼1동")
+        db.session.add(dong)
+        db.session.commit()
+        alice = _make_user(db, dong.id, "alice")
+        bob = _make_user(db, dong.id, "bob")
+
+        # 10h gap between the matched pair -> time_penalty = 15 (> 6h, <= 24h)
+        existing = _make_photo(db, alice, dong.id, "56다7890", datetime(2026, 7, 10, 9, 0, 0))
+        new_photo = _make_photo(
+            db, bob, dong.id, "56다7890", datetime(2026, 7, 10, 19, 0, 0), lat=37.5007, lon=127.0365
+        )
+
+        # 2 old lonely sightings of the same plate -> repeat_visit_penalty = min(2 * 10, 30) = 20
+        _make_photo(db, alice, dong.id, "56다7890", datetime(2020, 1, 1, 9, 0, 0), status="PENDING")
+        _make_photo(db, alice, dong.id, "56다7890", datetime(2020, 1, 1, 10, 0, 0), status="EXPIRED")
+
+        # Expected score = 100 - 15 (time) + 0 (no VALID history) - 20 (repeat visits) = 65
+        # -> REVIEWING (40 <= 65 < 70)
+        report = attempt_stitch(new_photo, TEST_CONFIG)
+
+        assert report is not None
+        assert report.ai_score == 65
+        assert report.status == "REVIEWING"
+        assert report.resolved_at is None
+
+        alice_after = User.query.filter_by(username="alice").first()
+        bob_after = User.query.filter_by(username="bob").first()
+        assert alice_after.trust_score == 100
+        assert bob_after.trust_score == 100
+        assert TrustScoreLog.query.count() == 0
 
 
 def test_sweep_expired_photos_flags_stale_pending_rows(app, db):
