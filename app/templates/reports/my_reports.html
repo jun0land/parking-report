@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}내 신고 현황 - 클린파킹{% endblock %}
+{% block content %}
+<h1>내 신고 현황</h1>
+
+<section>
+  <h2>매칭 대기중 ({{ pending_photos|length }})</h2>
+  <ul>
+    {% for photo in pending_photos %}
+    <li>번호판 {{ photo.plate_number }} · 촬영 {{ photo.captured_at }}</li>
+    {% else %}
+    <li class="empty">매칭 대기 중인 사진이 없습니다.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section>
+  <h2>AI 검토중 ({{ reviewing|length }})</h2>
+  <ul>
+    {% for report in reviewing %}
+    <li>번호판 {{ report.plate_number }} · AI 점수 {{ report.ai_score }}점 · {{ report.ai_reason }}</li>
+    {% else %}
+    <li class="empty">검토 중인 신고가 없습니다.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section>
+  <h2>접수완료 - 유효 ({{ valid|length }})</h2>
+  <ul>
+    {% for report in valid %}
+    <li>번호판 {{ report.plate_number }} · {{ report.dong.name }} · AI 점수 {{ report.ai_score }}점</li>
+    {% else %}
+    <li class="empty">아직 유효 처리된 신고가 없습니다.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section>
+  <h2>반려 · 만료</h2>
+  <ul>
+    {% for report in rejected %}
+    <li>번호판 {{ report.plate_number }} · 반려 (AI 점수 {{ report.ai_score }}점, 무감점)</li>
+    {% endfor %}
+    {% for photo in expired_photos %}
+    <li>번호판 {{ photo.plate_number }} · 매칭 상대를 찾지 못해 만료됨</li>
+    {% endfor %}
+    {% for photo in false_photos %}
+    <li>번호판 {{ photo.plate_number }} · 허위(중복 이미지 재사용, -30점)</li>
+    {% endfor %}
+    {% if not rejected and not expired_photos and not false_photos %}
+    <li class="empty">반려되거나 만료된 신고가 없습니다.</li>
+    {% endif %}
+  </ul>
+</section>
+{% endblock %}

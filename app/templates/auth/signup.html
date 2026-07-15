@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}회원가입 - 클린파킹{% endblock %}
+{% block content %}
+<h1>회원가입</h1>
+<form method="post" novalidate>
+  {{ form.hidden_tag() }}
+  <label>{{ form.username.label }} {{ form.username() }}</label>
+  <label>{{ form.password.label }} {{ form.password() }}</label>
+  <label>{{ form.password_confirm.label }} {{ form.password_confirm() }}</label>
+  <label>{{ form.nickname.label }} {{ form.nickname() }}</label>
+  <label>{{ form.dong_id.label }} {{ form.dong_id() }}</label>
+
+  <fieldset class="verify-box">
+    <legend>본인인증 (데모용 시뮬레이션)</legend>
+    <label>{{ form.name.label }} {{ form.name() }}</label>
+    <label>{{ form.birthdate.label }} {{ form.birthdate(placeholder="YYYY-MM-DD") }}</label>
+    <label>{{ form.phone.label }} {{ form.phone(placeholder="010-0000-0000") }}</label>
+    <button type="button" id="verify-btn" onclick="simulateVerification()">인증요청</button>
+    <span id="verify-status"></span>
+  </fieldset>
+
+  {{ form.submit(class_="btn btn-primary") }}
+</form>
+<script>
+function simulateVerification() {
+  var btn = document.getElementById("verify-btn");
+  var status = document.getElementById("verify-status");
+  btn.disabled = true;
+  status.textContent = "인증 중...";
+  setTimeout(function () {
+    status.textContent = "✓ 인증 완료 (데모용 시뮬레이션)";
+    status.classList.add("verified");
+  }, 1500);
+}
+</script>
+{% endblock %}

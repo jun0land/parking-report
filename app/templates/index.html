@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}클린파킹 - 우리 동네 불법주정차 신고{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>사진 한 장이면 충분해요</h1>
+  <p>서로 다른 두 시민이 각자 한 장씩만 찍으면, 나머지는 서버가 자동으로 이어붙여(Data Stitching) 신고를 완성합니다. 현장에서 1분을 기다릴 필요가 없어요.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="{{ url_for('auth.demo_login') }}">데모 계정으로 둘러보기</a>
+    <a class="btn btn-secondary" href="{{ url_for('auth.signup') }}">회원가입</a>
+  </div>
+</section>
+{% endblock %}

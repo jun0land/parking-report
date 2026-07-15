@@ -1,0 +1,54 @@
+:root {
+  color-scheme: light dark;
+  --accent: #ff6b3d;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.nav-links a { margin-left: 0.75rem; text-decoration: none; color: inherit; }
+.brand { font-weight: bold; text-decoration: none; color: var(--accent); }
+
+.container { max-width: 640px; margin: 0 auto; padding: 1rem; }
+
+.hero { text-align: center; padding: 2rem 1rem; }
+.hero-actions { margin-top: 1.5rem; display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+
+.btn {
+  display: inline-block;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.btn-primary { background: var(--accent); color: white; }
+.btn-secondary { background: #eee; color: var(--fg); }
+
+form label { display: block; margin-bottom: 0.75rem; }
+form input, form select { display: block; width: 100%; padding: 0.5rem; margin-top: 0.25rem; }
+
+.verify-box { border: 1px dashed #ccc; padding: 0.75rem; border-radius: 8px; margin: 1rem 0; }
+#verify-status.verified { color: green; font-weight: bold; }
+
+.flashes { list-style: none; padding: 0; }
+.flash { padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.5rem; }
+.flash-success { background: #e6f7e9; }
+.flash-error { background: #fdeaea; }

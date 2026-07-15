@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}로그인 - 클린파킹{% endblock %}
+{% block content %}
+<h1>로그인</h1>
+<form method="post" novalidate>
+  {{ form.hidden_tag() }}
+  <label>{{ form.username.label }} {{ form.username() }}</label>
+  <label>{{ form.password.label }} {{ form.password() }}</label>
+  {{ form.submit(class_="btn btn-primary") }}
+</form>
+<p><a href="{{ url_for('auth.demo_login') }}">데모 계정으로 둘러보기</a></p>
+{% endblock %}

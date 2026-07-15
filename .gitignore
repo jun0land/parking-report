@@ -1,1 +1,10 @@
 .worktrees/
+__pycache__/
+*.pyc
+instance/
+app/static/uploads/
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+*.db

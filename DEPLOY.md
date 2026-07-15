@@ -1,0 +1,56 @@
+# PythonAnywhere 배포 가이드
+
+## 1. 최초 설정
+
+1. PythonAnywhere 대시보드 > Consoles > Bash 콘솔에서 저장소를 클론합니다.
+
+   ```bash
+   git clone <repo-url> parking-report
+   cd parking-report
+   ```
+
+2. 가상환경을 만들고 의존성을 설치합니다.
+
+   ```bash
+   mkvirtualenv --python=/usr/bin/python3.10 parking-report-venv
+   pip install -r requirements.txt
+   ```
+
+3. DB와 데모 데이터를 생성합니다.
+
+   ```bash
+   python scripts/seed_data.py
+   ```
+
+## 2. Web 앱 설정 (Web 탭)
+
+1. "Add a new web app" > Manual configuration > Python 3.10 선택
+2. Virtualenv 경로: `/home/<username>/.virtualenvs/parking-report-venv`
+3. WSGI 설정 파일을 열어 아래 내용으로 교체합니다.
+
+   ```python
+   import sys
+   path = "/home/<username>/parking-report"
+   if path not in sys.path:
+       sys.path.insert(0, path)
+
+   from wsgi import app as application
+   ```
+
+4. Static files 매핑 추가: URL `/static/` → Directory `/home/<username>/parking-report/app/static/`
+5. Reload 버튼을 눌러 앱을 시작합니다.
+
+## 3. 디스크 쿼터 주의 (무료 플랜 512MB)
+
+- `requirements.txt`에 새 패키지를 추가하기 전에 꼭 필요한지 재검토하세요. 가상환경만으로 300MB 이상을 차지할 수 있습니다.
+- 시드 이미지는 스크립트가 매번 640x480 소형 JPEG로 새로 생성하므로 저장소에 커밋하지 않습니다.
+- 실사용자 업로드 이미지는 저장 전 1280px로 리사이즈되도록 구현되어 있습니다(`app/reports/image_utils.py`). 이 로직을 임의로 비활성화하지 마세요.
+- 디스크 사용량은 Consoles > Bash에서 `du -sh ~` 로 주기적으로 확인하세요.
+
+## 4. 심사 기간 갱신 체크리스트 (매우 중요)
+
+PythonAnywhere 무료 플랜은 2026-01-15 이후 생성된 계정 기준으로 **웹 앱이 마지막 Reload로부터 약 1개월 후 자동 만료**됩니다. 공모전 제출은 링크 하나로 승부하는 경우가 많으므로, 심사 도중 링크가 죽는 것이 가장 큰 리스크입니다.
+
+- [ ] 제출 직전: Web 탭에서 앱을 한 번 Reload하여 만료 시점을 뒤로 미룹니다.
+- [ ] 심사 기간 동안 최소 2주 간격으로 PythonAnywhere에 로그인해 Web 탭에서 Reload하거나 앱에 직접 접속합니다.
+- [ ] 심사 결과 발표 후에도 추가 문의가 예상되면 만료 전 다시 Reload합니다.

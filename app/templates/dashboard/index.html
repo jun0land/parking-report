@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}대시보드 - 클린파킹{% endblock %}
+{% block content %}
+<h1>대시보드</h1>
+
+<section>
+  <h2>내 신뢰도 점수: {{ trust_score }}점</h2>
+</section>
+
+<section>
+  <h2>동네 청정 지수</h2>
+  <ul>
+    {% for dong in dong_stats %}
+    <li{% if dong.is_mine %} class="mine"{% endif %}>
+      {{ dong.name }}{% if dong.is_mine %} (내 동네){% endif %} — {{ dong.temperature }}℃
+      (유효 신고 {{ dong.valid_count }}건)
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section>
+  <h2>익명 랭킹 (유효 신고 건수 기준)</h2>
+  <ol>
+    {% for entry in ranking %}
+    <li>{{ entry.nickname }} ({{ entry.dong_name }}) — {{ entry.valid_count }}건</li>
+    {% else %}
+    <li class="empty">아직 랭킹에 오른 사용자가 없습니다.</li>
+    {% endfor %}
+  </ol>
+</section>
+{% endblock %}
