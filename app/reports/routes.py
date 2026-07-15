@@ -1,12 +1,13 @@
 import hashlib
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from flask import Blueprint, current_app, flash, redirect, render_template, url_for
+from flask import Blueprint, Response, current_app, flash, redirect, render_template, url_for
 from flask_login import current_user, login_required
 
 from app.extensions import db
-from app.models import Photo, Report, TrustScoreLog
+from app.models import Photo, Report, TrustScoreLog, User
+from app.reports.demo_image import generate_sample_image
 from app.reports.exif_utils import extract_gps_and_time
 from app.reports.forms import UploadForm
 from app.reports.image_utils import save_resized_image
@@ -47,14 +48,78 @@ def get_demo_hint():
         "plate_number": candidate.plate_number,
         "latitude": candidate.latitude,
         "longitude": candidate.longitude,
+        # Freshly computed "now" (not the waiting photo's own captured_at,
+        # which is ~10 minutes in the past per scripts/seed_data.py) so the
+        # gap between it and the waiting photo stays well inside the
+        # 60s-72h match window and the 0-penalty score band, no matter how
+        # long the demo session has been sitting open.
+        "captured_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+
+def ensure_demo_hint():
+    """Like get_demo_hint(), but self-healing: if the seeded "waiting" photo
+    has already been consumed (matched by an earlier judge's demo run, or
+    swept to EXPIRED after 72h), recreate an equivalent fresh one instead of
+    returning None.
+
+    Without this, the demo dies after exactly one successful run: the seed
+    script creates a single PENDING photo, get_demo_hint() finds it, the demo
+    account uploads a match, the photo flips to MATCHED -- and every judge
+    after the first sees no banner, no hint, and no sample-download button
+    until someone re-runs scripts/seed_data.py. This makes the demo's
+    freshness independent of reseeding (see DEPLOY.md).
+
+    NOTE: this mutates the database on what is otherwise a GET request
+    (upload()'s GET path renders the form and, for demo accounts, this hint).
+    That's normally a smell, but it's deliberately scoped to is_demo accounts
+    only and only ever inserts a harmless synthetic PENDING photo -- it does
+    not touch any real user's data.
+    """
+    hint = get_demo_hint()
+    if hint is not None:
+        return hint
+
+    # Demo-login itself requires a seeded DB (the "demo" user only exists via
+    # scripts/seed_data.py), so an unseeded DB with no non-demo users at all
+    # is a degenerate case that shouldn't happen in practice. Fail safe to
+    # None (matches today's behavior) rather than fabricate an owner.
+    owner = User.query.filter_by(is_demo=False).first()
+    if owner is None:
+        return None
+
+    image_bytes = generate_sample_image()
+    image_hash = hashlib.sha256(image_bytes).hexdigest()
+    image_path = save_resized_image(
+        image_bytes, current_app.config["UPLOAD_FOLDER"], current_app.config["MAX_IMAGE_DIMENSION"]
+    )
+
+    photo = Photo(
+        uploader_id=owner.id,
+        plate_number=current_app.config["DEMO_PLATE"],
+        image_path=image_path,
+        image_hash=image_hash,
+        # ~10 minutes in the past, same as scripts/seed_data.py's original
+        # waiting photo: comfortably inside the 60s-72h match window against
+        # a demo-account upload captured "now".
+        captured_at=datetime.utcnow() - timedelta(minutes=10),
+        gps_source="MANUAL",
+        latitude=current_app.config["DEMO_LAT"],
+        longitude=current_app.config["DEMO_LON"],
+        dong_id=owner.dong_id,
+        status="PENDING",
+    )
+    db.session.add(photo)
+    db.session.commit()
+
+    return get_demo_hint()
 
 
 @reports_bp.route("/upload", methods=["GET", "POST"])
 @login_required
 def upload():
     form = UploadForm()
-    demo_hint = get_demo_hint() if current_user.is_demo else None
+    demo_hint = ensure_demo_hint() if current_user.is_demo else None
 
     if form.validate_on_submit():
         allowed, limit_message = check_daily_upload_limit(current_user)
@@ -129,6 +194,20 @@ def upload():
         return redirect(url_for("reports.my_reports"))
 
     return render_template("reports/upload.html", form=form, demo_hint=demo_hint)
+
+
+@reports_bp.route("/demo-sample.jpg")
+@login_required
+def demo_sample():
+    # Generated fresh on every request rather than served as a static file:
+    # upload() flags any *re-used* image hash as a fraud ("FALSE") report
+    # with a -30 trust penalty, so a single static sample would break the
+    # demo for the second judge (or the same judge downloading it twice).
+    # See app/reports/demo_image.py for how uniqueness is guaranteed.
+    image_bytes = generate_sample_image()
+    response = Response(image_bytes, mimetype="image/jpeg")
+    response.headers["Content-Disposition"] = "attachment; filename=demo-sample.jpg"
+    return response
 
 
 @reports_bp.route("/my-reports")

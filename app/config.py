@@ -28,3 +28,11 @@ class Config:
     DAILY_LIMIT_MID_SCORE = 50     # >= this: 3/day, else 1/day
     DAILY_LIMIT_MID_COUNT = 3
     DAILY_LIMIT_LOW_COUNT = 1
+
+    # Demo plate/coords shared by scripts/seed_data.py (the seeded "waiting"
+    # photo) and app/reports/routes.py's ensure_demo_hint() (the self-healing
+    # fallback that recreates that same waiting photo once it's been
+    # consumed). Single source of truth so the two never drift apart.
+    DEMO_PLATE = "12가3456"
+    DEMO_LAT = 37.5006
+    DEMO_LON = 127.0364

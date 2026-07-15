@@ -1,4 +1,6 @@
+import hashlib
 import io
+import re
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -362,3 +364,164 @@ def test_my_reports_shows_valid_report_inserted_directly_after_signup(app, db, c
     assert response.status_code == 200
     assert "접수완료 - 유효 (1)".encode("utf-8") in response.data
     assert "12가3456".encode("utf-8") in response.data
+
+
+def test_demo_hint_includes_a_fresh_captured_at(app, db, client):
+    # Deliberately NOT wrapped in its own `with app.app_context():`: the
+    # `app` fixture already keeps one app context open for the whole test
+    # (see conftest.py), and `client.get()/post()` below reuse that same
+    # context (and therefore the same db.session) rather than pushing a new
+    # one. Loading `demo` here in a *separate* nested app context, mutating
+    # it, and committing would write the change to the DB just fine -- but
+    # the outer session's identity map (already holding a `demo` object from
+    # the signup POST below) would never be told to refresh, so a later
+    # query through that outer session (e.g. inside get_demo_hint() during
+    # client.get("/upload")) would silently return the stale, pre-mutation
+    # copy instead of hitting the DB again. Keeping every read/write here on
+    # the one shared session sidesteps that entirely.
+    _signup_and_login(client, app, db, "demo")
+
+    demo = User.query.filter_by(username="demo").first()
+    demo.is_demo = True
+
+    other = User(
+        username="other", nickname="other-nick", name="테스트", birthdate="1990-01-01",
+        phone="010-0000-0001", dong_id=demo.dong_id,
+    )
+    other.set_password("test1234")
+    db.session.add(other)
+    db.session.commit()
+
+    # Waiting PENDING photo owned by someone else -- mirrors the seeded
+    # "demo_waiting.jpg" photo scripts/seed_data.py creates ~10 minutes
+    # in the past, which is what get_demo_hint() surfaces to the demo
+    # account.
+    db.session.add(
+        Photo(
+            uploader_id=other.id, plate_number="12가3456", image_path="waiting.jpg",
+            image_hash="waiting-hash", captured_at=datetime.utcnow() - timedelta(minutes=10),
+            gps_source="MANUAL", latitude=37.5006, longitude=127.0364,
+            dong_id=other.dong_id, status="PENDING",
+        )
+    )
+    db.session.commit()
+
+    response = client.get("/upload")
+    assert response.status_code == 200
+    assert "촬영 시각".encode("utf-8") in response.data
+
+    pattern = "촬영 시각 <code>([^<]+)</code>".encode("utf-8")
+    match = re.search(pattern, response.data)
+    assert match is not None, response.data
+    captured_at_str = match.group(1).decode("utf-8")
+
+    # Must be a real, parseable timestamp in the format the upload form
+    # expects (manual_captured_at), and must be "now" -- not the waiting
+    # photo's own ~10-minute-old captured_at -- so the gap between the two
+    # stays comfortably inside the match window regardless of how long the
+    # demo session has been open.
+    parsed = datetime.strptime(captured_at_str, "%Y-%m-%d %H:%M:%S")
+    assert abs((datetime.utcnow() - parsed).total_seconds()) < 30
+
+
+def test_demo_hint_self_heals_when_no_pending_candidate_exists(app, db, client):
+    # Regression test for the demo dying after its first successful run:
+    # scripts/seed_data.py creates exactly one PENDING "waiting" photo, and
+    # get_demo_hint() returns None once it's consumed (matched, or swept to
+    # EXPIRED after 72h) -- which used to make the whole banner (including
+    # the sample-download button, since the template gates both behind
+    # `{% if demo_hint %}`) vanish for every judge after the first, until
+    # someone manually re-ran the seed script. ensure_demo_hint() (called
+    # from upload()) must notice there's no PENDING candidate and create a
+    # fresh one automatically.
+    #
+    # See test_demo_hint_includes_a_fresh_captured_at's docstring for why
+    # this stays on the single shared session/app-context the `app` fixture
+    # already provides, rather than nesting its own.
+    _signup_and_login(client, app, db, "demo")
+
+    demo = User.query.filter_by(username="demo").first()
+    demo.is_demo = True
+
+    other = User(
+        username="other2", nickname="other2-nick", name="테스트", birthdate="1990-01-01",
+        phone="010-0000-0002", dong_id=demo.dong_id,
+    )
+    other.set_password("test1234")
+    db.session.add(other)
+    db.session.commit()
+
+    # No PENDING photo exists anywhere -- mirrors a DB where the seeded
+    # waiting photo has already been consumed (matched or expired), or a
+    # freshly-seeded-with-users-but-no-photos DB.
+    assert Photo.query.filter_by(status="PENDING").count() == 0
+
+    response = client.get("/upload")
+    assert response.status_code == 200
+
+    # Banner (and, since it's in the same gated block, the sample-download
+    # button) must render even though there was no pre-existing candidate.
+    assert "데모 시연 안내".encode("utf-8") in response.data
+    assert "샘플 사진 다운로드".encode("utf-8") in response.data
+
+    # A fresh PENDING photo must now exist, owned by a non-demo user (never
+    # by the demo account itself -- get_demo_hint() explicitly excludes the
+    # current user, so a self-owned candidate could never be surfaced back).
+    fresh_photo = Photo.query.filter_by(status="PENDING").first()
+    assert fresh_photo is not None
+    assert fresh_photo.uploader_id != demo.id
+    owner = User.query.get(fresh_photo.uploader_id)
+    assert owner.is_demo is False
+
+    plate_match = re.search("번호판 <code>([^<]+)</code>".encode("utf-8"), response.data)
+    lat_match = re.search("위도 <code>([^<]+)</code>".encode("utf-8"), response.data)
+    lon_match = re.search("경도 <code>([^<]+)</code>".encode("utf-8"), response.data)
+    captured_match = re.search("촬영 시각 <code>([^<]+)</code>".encode("utf-8"), response.data)
+    assert plate_match and lat_match and lon_match and captured_match
+
+    # A follow-up upload using exactly the hinted values must really match
+    # (via the live stitching engine) against the freshly self-healed
+    # waiting photo -- not just render, but actually work end to end.
+    upload_response = client.post(
+        "/upload",
+        data={
+            "photo": (io.BytesIO(_image_bytes(color=(5, 5, 5))), "demo-followup.jpg"),
+            "plate_number": plate_match.group(1).decode("utf-8"),
+            "manual_latitude": lat_match.group(1).decode("utf-8"),
+            "manual_longitude": lon_match.group(1).decode("utf-8"),
+            "manual_captured_at": captured_match.group(1).decode("utf-8"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert "매칭되어 신고가 접수되었습니다".encode("utf-8") in upload_response.data
+
+
+def test_demo_sample_download_is_unique_jpeg_every_time(app, db, client):
+    _signup_and_login(client, app, db, "alice")
+
+    response1 = client.get("/demo-sample.jpg")
+    assert response1.status_code == 200
+    assert response1.content_type == "image/jpeg"
+    disposition = response1.headers["Content-Disposition"]
+    assert "attachment" in disposition
+    assert "demo-sample.jpg" in disposition
+
+    # Valid, openable JPEG bytes.
+    img = Image.open(io.BytesIO(response1.data))
+    assert img.format == "JPEG"
+
+    # N=20 downloads, all sha256s must be unique. A 2-download comparison
+    # can pass by luck (e.g. if uniqueness relied on picking a different
+    # car color out of a handful of choices); a prior version of this sample
+    # generator relied on near-invisible noise pixels that JPEG's quality-85
+    # quantization silently erased, so only ~8 distinct hashes existed across
+    # 200 real downloads. 20 downloads makes that class of regression fail
+    # here instead of surfacing empirically in front of judges.
+    hashes = set()
+    for _ in range(20):
+        response = client.get("/demo-sample.jpg")
+        assert response.status_code == 200
+        hashes.add(hashlib.sha256(response.data).hexdigest())
+
+    assert len(hashes) == 20

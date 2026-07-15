@@ -6,7 +6,7 @@ from app.reports.stitching import attempt_stitch, find_match_candidate
 
 
 def test_seed_creates_demo_account_and_matchable_pending_photo(app):
-    from scripts.seed_data import DEMO_PLATE, run
+    from scripts.seed_data import run
 
     run(app)
 
@@ -15,7 +15,9 @@ def test_seed_creates_demo_account_and_matchable_pending_photo(app):
         assert demo is not None
         assert demo.username == "demo"
 
-        waiting_photo = Photo.query.filter_by(plate_number=DEMO_PLATE, status="PENDING").first()
+        waiting_photo = Photo.query.filter_by(
+            plate_number=app.config["DEMO_PLATE"], status="PENDING"
+        ).first()
         assert waiting_photo is not None
         assert waiting_photo.uploader_id != demo.id
 
@@ -33,21 +35,25 @@ def test_seed_waiting_photo_actually_matches_a_fresh_demo_upload(app):
     app/config.py would silently break the live demo without this test
     catching it.
     """
-    from scripts.seed_data import DEMO_LAT, DEMO_LON, DEMO_PLATE, run
+    from scripts.seed_data import run
 
     run(app)
 
     with app.app_context():
+        demo_plate = app.config["DEMO_PLATE"]
+        demo_lat = app.config["DEMO_LAT"]
+        demo_lon = app.config["DEMO_LON"]
+
         demo = User.query.filter_by(is_demo=True).first()
-        waiting_photo = Photo.query.filter_by(plate_number=DEMO_PLATE, status="PENDING").first()
+        waiting_photo = Photo.query.filter_by(plate_number=demo_plate, status="PENDING").first()
         assert waiting_photo is not None
 
         # Simulate exactly what a fresh demo-account upload would look like
         # right now: same plate/coordinates, captured "now".
         new_photo = Photo(
-            uploader_id=demo.id, plate_number=DEMO_PLATE, image_path="uploads/demo_fresh.jpg",
+            uploader_id=demo.id, plate_number=demo_plate, image_path="uploads/demo_fresh.jpg",
             image_hash="fresh-demo-upload-hash", captured_at=datetime.utcnow(), gps_source="MANUAL",
-            latitude=DEMO_LAT, longitude=DEMO_LON, dong_id=demo.dong_id, status="PENDING",
+            latitude=demo_lat, longitude=demo_lon, dong_id=demo.dong_id, status="PENDING",
         )
 
         candidate = find_match_candidate(new_photo, app.config)

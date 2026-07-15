@@ -7,7 +7,11 @@
 <div class="verify-box">
   <strong>데모 시연 안내</strong>
   <p>번호판 <code>{{ demo_hint.plate_number }}</code>, 위도 <code>{{ demo_hint.latitude }}</code>,
-  경도 <code>{{ demo_hint.longitude }}</code>를 입력해보세요 — 다른 시민이 방금 올린 사진과 바로 매칭됩니다.</p>
+  경도 <code>{{ demo_hint.longitude }}</code>, 촬영 시각 <code>{{ demo_hint.captured_at }}</code>를
+  입력해보세요 — 다른 시민이 방금 올린 사진과 바로 매칭됩니다.
+  (촬영 시각은 UTC 기준이며, 그대로 붙여넣으면 됩니다.)</p>
+  <p><a href="{{ url_for('reports.demo_sample') }}">샘플 사진 다운로드</a> —
+  다운로드한 샘플 사진을 아래 폼에 첨부하세요 (다운로드할 때마다 고유한 사진이 생성됩니다).</p>
 </div>
 {% endif %}
 
