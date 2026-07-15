@@ -2,11 +2,12 @@ import hashlib
 import io
 from datetime import datetime
 
-from flask import Blueprint, current_app, flash, redirect, render_template, url_for
+from flask import Blueprint, Response, current_app, flash, redirect, render_template, url_for
 from flask_login import current_user, login_required
 
 from app.extensions import db
 from app.models import Photo, Report, TrustScoreLog
+from app.reports.demo_image import generate_sample_image
 from app.reports.exif_utils import extract_gps_and_time
 from app.reports.forms import UploadForm
 from app.reports.image_utils import save_resized_image
@@ -47,6 +48,12 @@ def get_demo_hint():
         "plate_number": candidate.plate_number,
         "latitude": candidate.latitude,
         "longitude": candidate.longitude,
+        # Freshly computed "now" (not the waiting photo's own captured_at,
+        # which is ~10 minutes in the past per scripts/seed_data.py) so the
+        # gap between it and the waiting photo stays well inside the
+        # 60s-72h match window and the 0-penalty score band, no matter how
+        # long the demo session has been sitting open.
+        "captured_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
@@ -129,6 +136,20 @@ def upload():
         return redirect(url_for("reports.my_reports"))
 
     return render_template("reports/upload.html", form=form, demo_hint=demo_hint)
+
+
+@reports_bp.route("/demo-sample.jpg")
+@login_required
+def demo_sample():
+    # Generated fresh on every request rather than served as a static file:
+    # upload() flags any *re-used* image hash as a fraud ("FALSE") report
+    # with a -30 trust penalty, so a single static sample would break the
+    # demo for the second judge (or the same judge downloading it twice).
+    # See app/reports/demo_image.py for how uniqueness is guaranteed.
+    image_bytes = generate_sample_image()
+    response = Response(image_bytes, mimetype="image/jpeg")
+    response.headers["Content-Disposition"] = "attachment; filename=demo-sample.jpg"
+    return response
 
 
 @reports_bp.route("/my-reports")
