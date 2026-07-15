@@ -12,9 +12,6 @@ from app.extensions import db
 from app.models import Dong, Photo, Report, TrustScoreLog, User
 
 DONG_NAMES = ["역삼1동", "역삼2동", "삼성2동", "논현1동", "대치4동"]
-DEMO_PLATE = "12가3456"
-DEMO_LAT = 37.5006
-DEMO_LON = 127.0364
 
 
 def _make_seed_image(app, filename, color):
@@ -63,12 +60,18 @@ def run(app=None):
 
         # A PENDING photo owned by another (non-demo) user, ready to be
         # matched the moment the demo account uploads a photo of the same
-        # plate/location — this is the live "killer demo" moment.
+        # plate/location — this is the live "killer demo" moment. Plate/
+        # coords come from app.config (DEMO_PLATE/DEMO_LAT/DEMO_LON) rather
+        # than being duplicated here, so this seeded photo and the
+        # self-healing fallback in app/reports/routes.py's ensure_demo_hint()
+        # (which recreates an equivalent photo once this one is consumed)
+        # always agree on the same plate/location.
         waiting_path, waiting_hash = _make_seed_image(app, "demo_waiting.jpg", (200, 60, 60))
         waiting_photo = Photo(
-            uploader_id=other_users[0].id, plate_number=DEMO_PLATE, image_path=waiting_path,
+            uploader_id=other_users[0].id, plate_number=app.config["DEMO_PLATE"], image_path=waiting_path,
             image_hash=waiting_hash, captured_at=now - timedelta(minutes=10), gps_source="MANUAL",
-            latitude=DEMO_LAT, longitude=DEMO_LON, dong_id=other_users[0].dong_id, status="PENDING",
+            latitude=app.config["DEMO_LAT"], longitude=app.config["DEMO_LON"],
+            dong_id=other_users[0].dong_id, status="PENDING",
         )
         db.session.add(waiting_photo)
 

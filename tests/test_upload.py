@@ -424,6 +424,79 @@ def test_demo_hint_includes_a_fresh_captured_at(app, db, client):
     assert abs((datetime.utcnow() - parsed).total_seconds()) < 30
 
 
+def test_demo_hint_self_heals_when_no_pending_candidate_exists(app, db, client):
+    # Regression test for the demo dying after its first successful run:
+    # scripts/seed_data.py creates exactly one PENDING "waiting" photo, and
+    # get_demo_hint() returns None once it's consumed (matched, or swept to
+    # EXPIRED after 72h) -- which used to make the whole banner (including
+    # the sample-download button, since the template gates both behind
+    # `{% if demo_hint %}`) vanish for every judge after the first, until
+    # someone manually re-ran the seed script. ensure_demo_hint() (called
+    # from upload()) must notice there's no PENDING candidate and create a
+    # fresh one automatically.
+    #
+    # See test_demo_hint_includes_a_fresh_captured_at's docstring for why
+    # this stays on the single shared session/app-context the `app` fixture
+    # already provides, rather than nesting its own.
+    _signup_and_login(client, app, db, "demo")
+
+    demo = User.query.filter_by(username="demo").first()
+    demo.is_demo = True
+
+    other = User(
+        username="other2", nickname="other2-nick", name="테스트", birthdate="1990-01-01",
+        phone="010-0000-0002", dong_id=demo.dong_id,
+    )
+    other.set_password("test1234")
+    db.session.add(other)
+    db.session.commit()
+
+    # No PENDING photo exists anywhere -- mirrors a DB where the seeded
+    # waiting photo has already been consumed (matched or expired), or a
+    # freshly-seeded-with-users-but-no-photos DB.
+    assert Photo.query.filter_by(status="PENDING").count() == 0
+
+    response = client.get("/upload")
+    assert response.status_code == 200
+
+    # Banner (and, since it's in the same gated block, the sample-download
+    # button) must render even though there was no pre-existing candidate.
+    assert "데모 시연 안내".encode("utf-8") in response.data
+    assert "샘플 사진 다운로드".encode("utf-8") in response.data
+
+    # A fresh PENDING photo must now exist, owned by a non-demo user (never
+    # by the demo account itself -- get_demo_hint() explicitly excludes the
+    # current user, so a self-owned candidate could never be surfaced back).
+    fresh_photo = Photo.query.filter_by(status="PENDING").first()
+    assert fresh_photo is not None
+    assert fresh_photo.uploader_id != demo.id
+    owner = User.query.get(fresh_photo.uploader_id)
+    assert owner.is_demo is False
+
+    plate_match = re.search("번호판 <code>([^<]+)</code>".encode("utf-8"), response.data)
+    lat_match = re.search("위도 <code>([^<]+)</code>".encode("utf-8"), response.data)
+    lon_match = re.search("경도 <code>([^<]+)</code>".encode("utf-8"), response.data)
+    captured_match = re.search("촬영 시각 <code>([^<]+)</code>".encode("utf-8"), response.data)
+    assert plate_match and lat_match and lon_match and captured_match
+
+    # A follow-up upload using exactly the hinted values must really match
+    # (via the live stitching engine) against the freshly self-healed
+    # waiting photo -- not just render, but actually work end to end.
+    upload_response = client.post(
+        "/upload",
+        data={
+            "photo": (io.BytesIO(_image_bytes(color=(5, 5, 5))), "demo-followup.jpg"),
+            "plate_number": plate_match.group(1).decode("utf-8"),
+            "manual_latitude": lat_match.group(1).decode("utf-8"),
+            "manual_longitude": lon_match.group(1).decode("utf-8"),
+            "manual_captured_at": captured_match.group(1).decode("utf-8"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert "매칭되어 신고가 접수되었습니다".encode("utf-8") in upload_response.data
+
+
 def test_demo_sample_download_is_unique_jpeg_every_time(app, db, client):
     _signup_and_login(client, app, db, "alice")
 
@@ -438,14 +511,17 @@ def test_demo_sample_download_is_unique_jpeg_every_time(app, db, client):
     img = Image.open(io.BytesIO(response1.data))
     assert img.format == "JPEG"
 
-    response2 = client.get("/demo-sample.jpg")
-    assert response2.status_code == 200
+    # N=20 downloads, all sha256s must be unique. A 2-download comparison
+    # can pass by luck (e.g. if uniqueness relied on picking a different
+    # car color out of a handful of choices); a prior version of this sample
+    # generator relied on near-invisible noise pixels that JPEG's quality-85
+    # quantization silently erased, so only ~8 distinct hashes existed across
+    # 200 real downloads. 20 downloads makes that class of regression fail
+    # here instead of surfacing empirically in front of judges.
+    hashes = set()
+    for _ in range(20):
+        response = client.get("/demo-sample.jpg")
+        assert response.status_code == 200
+        hashes.add(hashlib.sha256(response.data).hexdigest())
 
-    # The single most important property: two downloads must never be
-    # byte-identical. upload() flags a *re-used* image hash as a fraud
-    # ("FALSE") report with a -30 trust penalty -- if every judge downloaded
-    # the same static sample, the second judge (or the same judge downloading
-    # it twice) would trip that detector and break the demo.
-    hash1 = hashlib.sha256(response1.data).hexdigest()
-    hash2 = hashlib.sha256(response2.data).hexdigest()
-    assert hash1 != hash2
+    assert len(hashes) == 20
