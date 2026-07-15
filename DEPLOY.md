@@ -12,7 +12,7 @@
 2. 가상환경을 만들고 의존성을 설치합니다.
 
    ```bash
-   mkvirtualenv --python=/usr/bin/python3.10 parking-report-venv
+   mkvirtualenv --python=/usr/bin/python3.10 parking-venv
    pip install -r requirements.txt
    ```
 
@@ -25,7 +25,7 @@
 ## 2. Web 앱 설정 (Web 탭)
 
 1. "Add a new web app" > Manual configuration > Python 3.10 선택
-2. Virtualenv 경로: `/home/<username>/.virtualenvs/parking-report-venv`
+2. Virtualenv 경로: `/home/<username>/.virtualenvs/parking-venv`
 3. WSGI 설정 파일을 열어 아래 내용으로 교체합니다.
 
    ```python
@@ -54,3 +54,29 @@ PythonAnywhere 무료 플랜은 2026-01-15 이후 생성된 계정 기준으로 
 - [ ] 제출 직전: Web 탭에서 앱을 한 번 Reload하여 만료 시점을 뒤로 미룹니다.
 - [ ] 심사 기간 동안 최소 2주 간격으로 PythonAnywhere에 로그인해 Web 탭에서 Reload하거나 앱에 직접 접속합니다.
 - [ ] 심사 결과 발표 후에도 추가 문의가 예상되면 만료 전 다시 Reload합니다.
+
+## 5. 원커맨드 업데이트
+
+저장소 최신 커밋으로 코드를 갱신하고, 의존성을 설치하고, 데모 데이터를 초기 상태로 리셋하고, 웹앱을 리로드하는 과정을 `update.sh` 스크립트 하나로 처리할 수 있습니다.
+
+- 최초 1회만 실행 권한을 부여합니다.
+
+  ```bash
+  chmod +x update.sh
+  ```
+
+- 이후로는 Bash 콘솔에서 아래 한 줄만 실행하면 됩니다.
+
+  ```bash
+  ./update.sh
+  ```
+
+  내부적으로 다음을 순서대로 수행합니다.
+  1. `git pull`로 최신 코드를 가져옵니다.
+  2. `pip install -r requirements.txt`로 의존성을 갱신합니다.
+  3. `scripts/seed_data.py`를 다시 실행해 데모 데이터를 초기 상태로 리셋합니다 (기존 DB는 덮어써집니다).
+  4. WSGI 파일을 touch하여 웹앱을 자동으로 Reload합니다.
+
+  4번 덕분에 위 "4. 심사 기간 갱신 체크리스트"의 주기적 Reload 요건도 함께 충족됩니다 — `update.sh`를 2주 간격으로 한 번씩 실행하는 것만으로 만료 방지와 데모 데이터 리셋을 동시에 처리할 수 있습니다.
+
+  주의: 스크립트는 가상환경 이름이 `parking-venv`라고 가정합니다 (`$HOME/.virtualenvs/parking-venv`), "1. 최초 설정"에서 만든 이름과 같습니다. 다른 이름을 썼다면 `update.sh` 상단의 `PIP`/`PYTHON` 경로를 맞게 수정하세요.
